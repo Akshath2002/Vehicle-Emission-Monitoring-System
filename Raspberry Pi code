@@ -1,0 +1,57 @@
+import serial
+import requests
+from twilio.rest import Client
+
+# Configure serial connection
+ser = serial.Serial('/dev/ttyACM0', 9600)  # Change port if necessary
+
+# ThingSpeak parameters
+API_KEY = 'YOUR_API_KEY'  # Replace with your ThingSpeak API Key
+BASE_URL = f'https://api.thingspeak.com/update?api_key={API_KEY}'
+
+# Twilio parameters
+TWILIO_SID = 'YOUR_TWILIO_SID'  # Replace with your Twilio Account SID
+TWILIO_AUTH_TOKEN = 'YOUR_TWILIO_AUTH_TOKEN'  # Replace with your Twilio Auth Token
+TWILIO_PHONE_NUMBER = 'YOUR_TWILIO_PHONE_NUMBER'  # Replace with your Twilio phone number
+TARGET_PHONE_NUMBER = 'TARGET_PHONE_NUMBER'  # Replace with the recipient phone number
+
+# Twilio client
+client = Client(TWILIO_SID, TWILIO_AUTH_TOKEN)
+
+# Flag variable for SMS notification
+sms_sent = False
+
+# Function to get IP-based location
+def get_ip_location():
+    response = requests.get('https://ipinfo.io')
+    if response.status_code == 200:
+        data = response.json()
+        return f"{data['city']}, {data['region']}, {data['country']}"
+    else:
+        return "Unknown Location"
+
+# Read data from Arduino, get IP location, upload to ThingSpeak, and send SMS
+while True:
+    line = ser.readline().decode().strip()
+    if line.startswith("MQ7 PPM:"):
+        mq7_ppm = float(line.split(":")[1])
+        mq135_ppm = float(ser.readline().decode().strip().split(":")[1])
+        sound_value = int(ser.readline().decode().strip().split(":")[1])
+        ip_location = get_ip_location()
+        data = {'field1': mq7_ppm, 'field2': mq135_ppm, 'field3': sound_value, 'field4': ip_location}
+        response = requests.get(BASE_URL, params=data)
+        print("Uploaded to ThingSpeak:", response.status_code, response.text)
+        
+        # Check if the value exceeds the threshold and send SMS
+        threshold = 200  # Adjust the threshold value as per your requirements
+        if (mq7_ppm > threshold or mq135_ppm > threshold or sound_value > threshold) and not sms_sent:
+            message = f"Air quality or sound level exceeded the threshold! MQ7 PPM: {mq7_ppm}, MQ135 PPM: {mq135_ppm}, Sound Value: {sound_value}, IP Location: {ip_location}"
+            client.messages.create(
+                body=message,
+                from_=TWILIO_PHONE_NUMBER,
+                to=TARGET_PHONE_NUMBER
+            )
+            print("SMS sent.")
+            sms_sent = True
+        elif mq7_ppm <= threshold and mq135_ppm <= threshold and sound_value <= threshold:
+            sms_sent = False
