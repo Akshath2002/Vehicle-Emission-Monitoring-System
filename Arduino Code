@@ -1,0 +1,110 @@
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>
+
+// MQ7 Gas Sensor
+const int MQ7_PIN = A0;
+const float MQ7_RL = 10.0; // Load resistance value in kilo-ohms
+const float MQ7_RO_CLEAN_AIR = 22; // Resistance of the sensor in clean air
+
+// MQ135 Gas Sensor
+const int MQ135_PIN = A1;
+const float MQ135_RL = 10.0; // Load resistance value in kilo-ohms
+const float MQ135_RO_CLEAN_AIR = 10; // Resistance of the sensor in clean air
+
+// Sound Sensor
+const int SOUND_PIN = A2;
+
+// Relay Control Pins
+//const int RELAY_PIN_1 = 2;
+//const int RELAY_PIN_2 = 3;
+
+// Thresholds
+const float THRESHOLD_MQ7 = 1001.14;    // Threshold value for MQ7 sensor
+const float THRESHOLD_MQ135 = 60.068;  // Threshold value for MQ135 sensor
+const int THRESHOLD_SOUND = 500;      // Threshold value for sound sensor
+
+// GPS module
+SoftwareSerial gpsSerial(10, 11); // RX, TX
+TinyGPSPlus gps;
+
+void setup() {
+  Serial.begin(9600);
+  gpsSerial.begin(9600);
+  
+  pinMode(8, OUTPUT);
+  //pinMode(RELAY_PIN_2, OUTPUT);
+  
+  //digitalWrite(RELAY_PIN_1, LOW);  // Initialize relay pins to OFF state
+  //digitalWrite(RELAY_PIN_2, LOW);
+  
+  delay(1000);
+}
+
+void loop() {
+  while (gpsSerial.available() > 0) {
+    if (gps.encode(gpsSerial.read())) {
+      if (gps.location.isValid()) {
+        float latitude = gps.location.lat();
+        float longitude = gps.location.lng();
+        Serial.print("Latitude: ");
+        Serial.println(latitude, 6);
+        Serial.print("Longitude: ");
+        Serial.println(longitude, 6);
+        
+        // Upload GPS data to ThingSpeak
+        String gpsData = String(latitude, 6) + "," + String(longitude, 6);
+        Serial.print("GPS Data: ");
+        Serial.println(gpsData);
+        Serial.flush();
+      }
+    }
+  }
+  
+  float mq7Voltage = getSensorVoltage(MQ7_PIN);
+  float mq7RS = getSensorResistance(mq7Voltage, MQ7_RL);
+  float mq7PPM = getPPMValue(mq7RS, MQ7_RO_CLEAN_AIR);
+  
+  float mq135Voltage = getSensorVoltage(MQ135_PIN);
+  float mq135RS = getSensorResistance(mq135Voltage, MQ135_RL);
+  float mq135PPM = getPPMValue(mq135RS, MQ135_RO_CLEAN_AIR);
+  
+  int val = analogRead(SOUND_PIN);
+  int soundValue = (1024-val);
+
+  
+  Serial.print("MQ7 PPM: ");
+  Serial.println(mq7PPM);
+  Serial.print("MQ135 PPM: ");
+  Serial.println(mq135PPM);
+  Serial.print("Sound Value: ");
+  Serial.println(soundValue);
+  
+  // Check if sensor values exceed thresholds
+  if (soundValue > THRESHOLD_SOUND) {
+    digitalWrite(8, HIGH);  // Turn OFF relay
+    //digitalWrite(RELAY_PIN_2, LOW);  // Turn OFF relay
+  } else {
+    digitalWrite(8, LOW); // Turn ON relay
+    //digitalWrite(RELAY_PIN_2, HIGH); // Turn ON relay
+  }
+  
+  delay(1000);
+}
+
+float getSensorVoltage(int pin) {
+  int sensorValue = analogRead(pin);
+  float voltage = (sensorValue / 1023.0) * 5.0;
+  return voltage;
+}
+
+float getSensorResistance(float voltage, float RL) {
+  float sensorVoltage = 5.0 - voltage;
+  float RS = (RL * sensorVoltage) / voltage;
+  return RS;
+}
+
+float getPPMValue(float RS, float RO_CLEAN_AIR) {
+  float ratio = RS / RO_CLEAN_AIR;
+  float ppm = 116.6020682 * pow(ratio, -2.769034857);
+  return ppm;
+}
